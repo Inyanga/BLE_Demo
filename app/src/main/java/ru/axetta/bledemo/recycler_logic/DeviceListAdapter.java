@@ -16,9 +16,11 @@ import ru.axetta.bledemo.ble.BluetoothLe;
 public class DeviceListAdapter extends RecyclerView.Adapter<DeviceListAdapter.DeviceViewHolder> {
 
     private List<BluetoothLe.DeviceLe> deviceList;
+    private OnDeviceClickListener listener;
 
-    public DeviceListAdapter(List<BluetoothLe.DeviceLe> deviceList) {
+    public DeviceListAdapter(List<BluetoothLe.DeviceLe> deviceList, OnDeviceClickListener listener) {
         this.deviceList = deviceList;
+        this.listener = listener;
     }
 
     @NonNull
@@ -34,6 +36,7 @@ public class DeviceListAdapter extends RecyclerView.Adapter<DeviceListAdapter.De
         holder.name.setText(device.getDevice().getName());
         holder.address.setText(device.getDevice().getAddress());
         holder.rssi.setText(String.format(Locale.getDefault(),"%d dBm", device.getRssi()));
+        holder.setOnDeviceClickListener(device, listener, position);
     }
 
     @Override
@@ -43,11 +46,20 @@ public class DeviceListAdapter extends RecyclerView.Adapter<DeviceListAdapter.De
 
     class DeviceViewHolder extends RecyclerView.ViewHolder {
         TextView name, address, rssi;
-        public DeviceViewHolder(View itemView) {
+        DeviceViewHolder(View itemView) {
             super(itemView);
             name = itemView.findViewById(R.id.deviceName);
             address = itemView.findViewById(R.id.deviceAddress);
             rssi = itemView.findViewById(R.id.deviceRssi);
         }
+        void setOnDeviceClickListener(BluetoothLe.DeviceLe deviceClickListener, final OnDeviceClickListener listener, final int position) {
+            itemView.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    listener.onDeviceClick(deviceList.get(position));
+                }
+            });
+        }
     }
+
 }

@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
@@ -54,6 +55,10 @@ public class BluetoothLe extends BluetoothGattCallback {
         void onScanStop();
 
         void onDeviceFound(DeviceLe deviceLe);
+
+        void onConnectFailed();
+
+        void onDisconnected();
     }
 
 
@@ -85,7 +90,7 @@ public class BluetoothLe extends BluetoothGattCallback {
     private BluetoothAdapter.LeScanCallback leScanCallback = new BluetoothAdapter.LeScanCallback() {
         @Override
         public void onLeScan(BluetoothDevice bluetoothDevice, int rssi, byte[] bytes) {
-
+            callback.onDeviceFound(new DeviceLe(bluetoothDevice, rssi));
         }
     };
 
@@ -93,7 +98,28 @@ public class BluetoothLe extends BluetoothGattCallback {
 
     @Override
     public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-        super.onConnectionStateChange(gatt, status, newState);
+        if(newState == BluetoothGatt.STATE_CONNECTED) {
+            if(status == BluetoothGatt.GATT_SUCCESS) {
+                if(!gatt.discoverServices()) {
+                    connectionFailure();
+                }
+            } else {
+                connectionFailure();
+            }
+        } else if(newState == BluetoothGatt.STATE_DISCONNECTED) {
+            callback.onDisconnected();
+        }
+    }
+
+    //----------------------------------------------------------------------------------------------
+
+    @Override
+    public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+        if (status == BluetoothGatt.GATT_FAILURE) {
+            connectionFailure();
+            return;
+        }
+       // BluetoothGattCharacteristic serialNum = gatt.get
     }
 
     //----------------------------------------------------------------------------------------------
@@ -104,6 +130,13 @@ public class BluetoothLe extends BluetoothGattCallback {
         } else {
             scanLeDevice();
         }
+    }
+
+    //----------------------------------------------------------------------------------------------
+
+    private void connectionFailure() {
+        callback.onConnectFailed();
+        Log.i("GATT ", "Connection failure");
     }
 
     //----------------------------------------------------------------------------------------------
@@ -131,6 +164,12 @@ public class BluetoothLe extends BluetoothGattCallback {
 
     private void scanLeDevice() {
         //TODO Make some 4.4 code
+    }
+
+    //----------------------------------------------------------------------------------------------
+
+    public void connect(DeviceLe deviceLe) {
+        gatt = deviceLe.getDevice().connectGatt(context, true, this);
     }
 
     //----------------------------------------------------------------------------------------------

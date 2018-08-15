@@ -12,6 +12,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
+import android.util.Log;
 import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -24,6 +25,7 @@ import java.util.List;
 
 import ru.axetta.bledemo.ble.BluetoothLe;
 import ru.axetta.bledemo.recycler_logic.DeviceListAdapter;
+import ru.axetta.bledemo.recycler_logic.OnDeviceClickListener;
 
 public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCallback {
 
@@ -32,8 +34,8 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
     private List<BluetoothLe.DeviceLe> deviceList = new ArrayList<>();
     private ProgressBar progressBar;
     private TextView statusText;
-    private RecyclerView deviceRecycler;
     private DeviceListAdapter adapter;
+    private BluetoothLe bluetoothLe;
 
 
     @Override
@@ -44,9 +46,15 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
         setSupportActionBar(toolbar);
         progressBar = findViewById(R.id.progressBar);
         statusText = findViewById(R.id.statusText);
-        deviceRecycler = findViewById(R.id.deviceRecycler);
+        RecyclerView deviceRecycler = findViewById(R.id.deviceRecycler);
         LinearLayoutManager layoutManager = new LinearLayoutManager(getApplicationContext());
-        adapter = new DeviceListAdapter(deviceList);
+        adapter = new DeviceListAdapter(deviceList, new OnDeviceClickListener() {
+            @Override
+            public void onDeviceClick(BluetoothLe.DeviceLe deviceLe) {
+                bluetoothLe.connect(deviceLe);
+                Log.i("RECYCLER ", "Click..");
+            }
+        });
         deviceRecycler.setLayoutManager(layoutManager);
         deviceRecycler.setAdapter(adapter);
         initBluetooth();
@@ -92,7 +100,7 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
     //----------------------------------------------------------------------------------------------
 
     private void scanForDevices() {
-        BluetoothLe bluetoothLe = new BluetoothLe(getApplicationContext(), bluetoothAdapter, this);
+        bluetoothLe = new BluetoothLe(getApplicationContext(), bluetoothAdapter, this);
         bluetoothLe.scan();
     }
 
@@ -147,5 +155,19 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
             deviceList.add(device);
             adapter.notifyDataSetChanged();
         }
+    }
+
+    //----------------------------------------------------------------------------------------------
+
+    @Override
+    public void onConnectFailed() {
+        Toast.makeText(this, "Connection failed", Toast.LENGTH_SHORT).show();
+    }
+
+    //----------------------------------------------------------------------------------------------
+
+    @Override
+    public void onDisconnected() {
+        Toast.makeText(this, "Device was disconnected", Toast.LENGTH_SHORT).show();
     }
 }
