@@ -5,22 +5,27 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
-import android.os.ParcelUuid;
 import android.support.annotation.RequiresApi;
 import android.util.Log;
 import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+import ru.axetta.bledemo.R;
 
 public class BluetoothLe extends BluetoothGattCallback {
 
@@ -46,10 +51,20 @@ public class BluetoothLe extends BluetoothGattCallback {
 
     private Context context;
     private BluetoothAdapter bluetoothAdapter;
+    private BluetoothLeScanner btScanner;
     private BleCallback callback;
     private BluetoothGatt gatt;
+    private DeviceLe nearestDevice;
+    private Queue<DeviceLe> rssiRequests = new ConcurrentLinkedQueue<>();
+    private Queue<BluetoothGattCharacteristic> charQueue = new ConcurrentLinkedQueue<>();
+    private BluetoothGattCharacteristic serialNum;
+    private BluetoothGattCharacteristic hwRev;
+    private BluetoothGattCharacteristic swRev;
+    private boolean findingNearest;
 
     public interface BleCallback {
+        void onBluetoothEnable();
+
         void onScanStart();
 
         void onScanStop();
@@ -58,7 +73,11 @@ public class BluetoothLe extends BluetoothGattCallback {
 
         void onConnectFailed();
 
+        void onNearestFound(DeviceLe device);
+
         void onDisconnected();
+
+        void onDeviceInfoAvailable(DeviceLe device);
     }
 
 
@@ -68,6 +87,29 @@ public class BluetoothLe extends BluetoothGattCallback {
         this.callback = callback;
     }
 
+
+    public void initBluetooth() {
+        if (!context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+            Toast.makeText(context.getApplicationContext(),
+                    R.string.ble_not_supported, Toast.LENGTH_LONG).show();
+        } else {
+            final BluetoothManager bluetoothManager =
+                    (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+            if (bluetoothManager != null)
+                bluetoothAdapter = bluetoothManager.getAdapter();
+            else {
+                Toast.makeText(context.getApplicationContext(),
+                        R.string.bt_not_supported, Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+                callback.onBluetoothEnable();
+            } else {
+                startScan();
+            }
+        }
+    }
+
     //----------------------------------------------------------------------------------------------
 
     private ScanCallback scanCallbackEx = new ScanCallback() {
@@ -75,7 +117,6 @@ public class BluetoothLe extends BluetoothGattCallback {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
             callback.onDeviceFound(new DeviceLe(result.getDevice(), result.getRssi()));
-           // Toast.makeText(context, "New device found " + result.getDevice().getName(), Toast.LENGTH_SHORT).show();
             Log.i("SCAN CALLBACK", "New device found " + result.getDevice().getName());
         }
 
@@ -98,15 +139,21 @@ public class BluetoothLe extends BluetoothGattCallback {
 
     @Override
     public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-        if(newState == BluetoothGatt.STATE_CONNECTED) {
-            if(status == BluetoothGatt.GATT_SUCCESS) {
-                if(!gatt.discoverServices()) {
+        if (newState == BluetoothGatt.STATE_CONNECTED) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+
+                if (findingNearest) {
+                    gatt.readRemoteRssi();
+                    return;
+                }
+
+                if (!gatt.discoverServices()) {
                     connectionFailure();
                 }
             } else {
                 connectionFailure();
             }
-        } else if(newState == BluetoothGatt.STATE_DISCONNECTED) {
+        } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
             callback.onDisconnected();
         }
     }
@@ -119,12 +166,46 @@ public class BluetoothLe extends BluetoothGattCallback {
             connectionFailure();
             return;
         }
-       // BluetoothGattCharacteristic serialNum = gatt.get
+        serialNum = gatt.getService(DEVICE_INFO_SRVS).getCharacteristic(DEVICE_SERIAL_NUM_CHAR);
+        hwRev = gatt.getService(DEVICE_INFO_SRVS).getCharacteristic(HW_REV_CHAR);
+        swRev = gatt.getService(DEVICE_INFO_SRVS).getCharacteristic(SW_REV_CHAR);
+        charQueue.offer(serialNum);
+        charQueue.offer(hwRev);
+        charQueue.offer(swRev);
+        gatt.readCharacteristic(serialNum);
     }
 
     //----------------------------------------------------------------------------------------------
 
-    public void scan() {
+    @Override
+    public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+        if (status == BluetoothGatt.GATT_SUCCESS) {
+            BluetoothGattCharacteristic nextChar = charQueue.poll();
+            if (nextChar != null) {
+                gatt.readCharacteristic(nextChar);
+            } else {
+                callback.onDeviceInfoAvailable(new DeviceLe(gatt.getDevice(), 0, serialNum.getStringValue(0), hwRev.getStringValue(0), swRev.getStringValue(0)));
+            }
+        }
+    }
+
+
+    //----------------------------------------------------------------------------------------------
+
+    @Override
+    public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
+        if (nearestDevice == null || nearestDevice.getRssi() < rssi) {
+            nearestDevice = new DeviceLe(gatt.getDevice(), rssi);
+        }
+        Log.i("RSSI ", String.valueOf(rssi));
+        gatt.disconnect();
+        getRssiQueueDevice();
+    }
+
+
+    //----------------------------------------------------------------------------------------------
+
+    public void startScan() {
         if (aboveLollipop) {
             scanLeDeviceExtended();
         } else {
@@ -143,20 +224,19 @@ public class BluetoothLe extends BluetoothGattCallback {
 
     @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     private void scanLeDeviceExtended() {
-        final BluetoothLeScanner btScanner = bluetoothAdapter.getBluetoothLeScanner();
-        List<ScanFilter> filters = new ArrayList<ScanFilter>();
+        btScanner = bluetoothAdapter.getBluetoothLeScanner();
+        List<ScanFilter> filters = new ArrayList<>();
         Handler handler = new Handler();
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                btScanner.stopScan(scanCallbackEx);
-                callback.onScanStop();
+                stopScan();
             }
         }, SCAN_MAX_TIME);
         ScanFilter scanServiceFilter = new ScanFilter.Builder().setDeviceName(FILTER_NAME).build();
         filters.add(scanServiceFilter);
         ScanSettings scanSettings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
-        btScanner.startScan(filters, scanSettings, scanCallbackEx);
+        btScanner.startScan(null, scanSettings, scanCallbackEx);
         callback.onScanStart();
     }
 
@@ -168,8 +248,46 @@ public class BluetoothLe extends BluetoothGattCallback {
 
     //----------------------------------------------------------------------------------------------
 
+    public void stopScan() {
+        if (aboveLollipop) {
+            if (btScanner != null) {
+                btScanner.stopScan(scanCallbackEx);
+                callback.onScanStop();
+            }
+        }
+    }
+
+    //----------------------------------------------------------------------------------------------
+
     public void connect(DeviceLe deviceLe) {
         gatt = deviceLe.getDevice().connectGatt(context, true, this);
+    }
+
+    //----------------------------------------------------------------------------------------------
+
+    public void connectNearestDevice(List<DeviceLe> deviceList) {
+        findingNearest = true;
+        for (DeviceLe deviceLe : deviceList) {
+            rssiRequests.offer(deviceLe);
+        }
+        getRssiQueueDevice();
+    }
+
+    //----------------------------------------------------------------------------------------------
+
+    private void getRssiQueueDevice() {
+        if (!rssiRequests.isEmpty()) {
+            DeviceLe device = rssiRequests.poll();
+            device.getDevice().connectGatt(context, true, this);
+        } else {
+            if (nearestDevice != null) {
+                findingNearest = false;
+                callback.onNearestFound(nearestDevice);
+                nearestDevice.getDevice().connectGatt(context, true, this);
+            } else {
+                Log.i("GATT ", "No devices in area");
+            }
+        }
     }
 
     //----------------------------------------------------------------------------------------------
@@ -177,10 +295,21 @@ public class BluetoothLe extends BluetoothGattCallback {
     public class DeviceLe {
         private BluetoothDevice device;
         private int rssi;
+        private String serialNumber;
+        private String hwRev;
+        private String swRev;
 
         DeviceLe(BluetoothDevice device, int rssi) {
             this.device = device;
             this.rssi = rssi;
+        }
+
+        public DeviceLe(BluetoothDevice device, int rssi, String serialNumber, String hwRev, String swRev) {
+            this.device = device;
+            this.rssi = rssi;
+            this.serialNumber = serialNumber;
+            this.hwRev = hwRev;
+            this.swRev = swRev;
         }
 
         public BluetoothDevice getDevice() {
@@ -197,6 +326,30 @@ public class BluetoothLe extends BluetoothGattCallback {
 
         public void setRssi(int rssi) {
             this.rssi = rssi;
+        }
+
+        public String getSerialNumber() {
+            return serialNumber;
+        }
+
+        public void setSerialNumber(String serialNumber) {
+            this.serialNumber = serialNumber;
+        }
+
+        public String getHwRev() {
+            return hwRev;
+        }
+
+        public void setHwRev(String hwRev) {
+            this.hwRev = hwRev;
+        }
+
+        public String getSwRev() {
+            return swRev;
+        }
+
+        public void setSwRev(String swRev) {
+            this.swRev = swRev;
         }
 
         @Override
