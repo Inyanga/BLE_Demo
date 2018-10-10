@@ -13,17 +13,17 @@ public class DeviceInfoActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_device_info);
-        name = findViewById(R.id.textView);
-        address = findViewById(R.id.textView2);
-        rssi = findViewById(R.id.textView3);
-        sn = findViewById(R.id.textView4);
-        hw = findViewById(R.id.textView5);
-        sw = findViewById(R.id.textView6);
-        name.setText(getIntent().getStringExtra(MainActivity.DEVICE_NAME));
-        address.setText(getIntent().getStringExtra(MainActivity.DEVICE_ADDRESS));
-        rssi.setText(getIntent().getIntExtra(MainActivity.DEVICE_RSSI, -666));
-        sn.setText(getIntent().getStringExtra(MainActivity.DEVICE_SN));
-        hw.setText(getIntent().getStringExtra(MainActivity.DEVICE_HW));
-        sw.setText(getIntent().getStringExtra(MainActivity.DEVICE_SW));
+//        name = findViewById(R.id.textView);
+//        address = findViewById(R.id.textView2);
+//        rssi = findViewById(R.id.textView3);
+//        sn = findViewById(R.id.textView4);
+//        hw = findViewById(R.id.textView5);
+//        sw = findViewById(R.id.textView6);
+//        name.setText(getIntent().getStringExtra(MainActivity.DEVICE_NAME));
+//        address.setText(getIntent().getStringExtra(MainActivity.DEVICE_ADDRESS));
+//        rssi.setText(getIntent().getIntExtra(MainActivity.DEVICE_RSSI, -666));
+//        sn.setText(getIntent().getStringExtra(MainActivity.DEVICE_SN));
+//        hw.setText(getIntent().getStringExtra(MainActivity.DEVICE_HW));
+//        sw.setText(getIntent().getStringExtra(MainActivity.DEVICE_SW));
     }
 }

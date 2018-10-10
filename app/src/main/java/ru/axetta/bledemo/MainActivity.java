@@ -1,9 +1,16 @@
 package ru.axetta.bledemo;
 
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
+import android.support.annotation.RequiresApi;
+import android.support.constraint.Group;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
@@ -12,12 +19,12 @@ import android.util.Log;
 import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.widget.Button;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import ru.axetta.bledemo.ble.BluetoothLe;
@@ -26,24 +33,14 @@ import ru.axetta.bledemo.recycler_logic.OnDeviceClickListener;
 
 public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCallback {
 
-
-    public static final String DEVICE_NAME = "device_name";
-    public static final String DEVICE_ADDRESS = "device_address";
-    public static final String DEVICE_RSSI = "device_rssi";
-    public static final String DEVICE_SN = "device_sn";
-    public static final String DEVICE_HW = "device_hw";
-    public static final String DEVICE_SW = "device_sw";
-
-
     private final static int BT_REQUEST_CODE = 1;
     private BluetoothAdapter bluetoothAdapter;
-    private List<BluetoothLe.DeviceLe> deviceList;
+    private List<BluetoothLe.DeviceLe> deviceList = new ArrayList<>();
     private ProgressBar progressBar;
-    private TextView statusText;
-    private Button scanBtn;
+    private TextView statusText, dName, notifyValue;
+    private Group recyclerGroup, deviceGroup;
     private DeviceListAdapter adapter;
     private BluetoothLe bluetoothLe;
-    private boolean isScaning;
 
 
     @Override
@@ -54,22 +51,43 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
         setSupportActionBar(toolbar);
         progressBar = findViewById(R.id.progressBar);
         statusText = findViewById(R.id.statusText);
-        scanBtn = findViewById(R.id.scanBtn);
-        deviceList = new ArrayList<>();
+        dName = findViewById(R.id.d_name);
+        notifyValue = findViewById(R.id.notify_value);
+        recyclerGroup = findViewById(R.id.recyclerGroup);
+        deviceGroup = findViewById(R.id.deviceGroup);
         RecyclerView deviceRecycler = findViewById(R.id.deviceRecycler);
         LinearLayoutManager layoutManager = new LinearLayoutManager(getApplicationContext());
-        adapter = new DeviceListAdapter(deviceList, new OnDeviceClickListener() {
-            @Override
-            public void onDeviceClick(BluetoothLe.DeviceLe deviceLe) {
-                bluetoothLe.connect(deviceLe);
-                Log.i("RECYCLER ", "Click..");
-            }
-        });
+        adapter = new DeviceListAdapter(deviceList, this);
+
         deviceRecycler.setLayoutManager(layoutManager);
         deviceRecycler.setAdapter(adapter);
-        bluetoothLe = new BluetoothLe(getApplicationContext(), bluetoothAdapter, this);
-        bluetoothLe.initBluetooth();
+        initBluetooth();
+    }
 
+    //----------------------------------------------------------------------------------------------
+
+    public void initBluetooth() {
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+            Toast.makeText(getApplicationContext(),
+                    R.string.ble_not_supported, Toast.LENGTH_LONG).show();
+        } else {
+            final BluetoothManager bluetoothManager =
+                    (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+            if (bluetoothManager != null)
+                bluetoothAdapter = bluetoothManager.getAdapter();
+            else {
+                Toast.makeText(getApplicationContext(),
+                        R.string.bt_not_supported, Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+                Intent btEnableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                startActivityForResult(btEnableIntent, BT_REQUEST_CODE);
+            } else {
+                scanForDevices();
+            }
+
+        }
     }
 
     //----------------------------------------------------------------------------------------------
@@ -78,9 +96,16 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         if (requestCode == BT_REQUEST_CODE) {
             if (resultCode == RESULT_OK) {
-                bluetoothLe.startScan();
+                scanForDevices();
             }
         }
+    }
+
+    //----------------------------------------------------------------------------------------------
+
+    private void scanForDevices() {
+        bluetoothLe = new BluetoothLe(getApplicationContext(), bluetoothAdapter, this);
+        bluetoothLe.scan();
     }
 
     //----------------------------------------------------------------------------------------------
@@ -111,40 +136,19 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
 
     //----------------------------------------------------------------------------------------------
 
-    public void scanTrigger(View view) {
-        if (isScaning) {
-            bluetoothLe.stopScan();
-        } else {
-            bluetoothLe.startScan();
-        }
-    }
-
-    //----------------------------------------------------------------------------------------------
-
-    public void connectToNearest(View view) {
-        bluetoothLe.connectNearestDevice(deviceList);
-    }
-
-    //----------------------------------------------------------------------------------------------
-
     @Override
     public void onScanStart() {
         statusText.setVisibility(View.VISIBLE);
         statusText.setText(R.string.scaning);
         progressBar.setVisibility(View.VISIBLE);
-        scanBtn.setText("STOP");
-        isScaning = true;
-        deviceList.clear();
     }
 
     //----------------------------------------------------------------------------------------------
 
     @Override
     public void onScanStop() {
-        //  statusText.setVisibility(View.INVISIBLE);
+        statusText.setVisibility(View.INVISIBLE);
         progressBar.setVisibility(View.INVISIBLE);
-        scanBtn.setText("START");
-        isScaning = false;
     }
 
     //----------------------------------------------------------------------------------------------
@@ -157,7 +161,6 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
         }
     }
 
-
     //----------------------------------------------------------------------------------------------
 
     @Override
@@ -169,38 +172,38 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
 
     @Override
     public void onDisconnected() {
-        // Toast.makeText(getApplicationContext(), "Device was disconnected", Toast.LENGTH_SHORT).show();
+//        Toast.makeText(getApplicationContext(), "Device was disconnected", Toast.LENGTH_SHORT).show();
     }
 
     //----------------------------------------------------------------------------------------------
 
 
     @Override
-    public void onBluetoothEnable() {
-        Intent btEnableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-        startActivityForResult(btEnableIntent, BT_REQUEST_CODE);
+    public void onDeviceInfoAvailable() {
+
     }
 
     @Override
-    public void onNearestFound(final BluetoothLe.DeviceLe device) {
+    public void onCharChanged(final byte[] value) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(getApplicationContext(), device.getDevice().getAddress(), Toast.LENGTH_SHORT).show();
+                notifyValue.setText(String.format("%s %s", notifyValue.getText(), Arrays.toString(value)));
             }
         });
 
     }
 
-    @Override
-    public void onDeviceInfoAvailable(BluetoothLe.DeviceLe device) {
-        Intent infoIntent = new Intent(getApplicationContext(), DeviceInfoActivity.class);
-        infoIntent.putExtra(DEVICE_NAME, device.getDevice().getName());
-        infoIntent.putExtra(DEVICE_ADDRESS, device.getDevice().getAddress());
-        infoIntent.putExtra(DEVICE_RSSI, device.getRssi());
-        infoIntent.putExtra(DEVICE_SN, device.getSerialNumber());
-        infoIntent.putExtra(DEVICE_HW, device.getHwRev());
-        infoIntent.putExtra(DEVICE_SW, device.getSwRev());
-        startActivity(infoIntent);
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    public void changeUi(BluetoothLe.DeviceLe device) {
+        bluetoothLe.stopScan();
+        recyclerGroup.setVisibility(View.GONE);
+        deviceGroup.setVisibility(View.VISIBLE);
+        dName.setText(device.getDevice().getName());
+        bluetoothLe.connect(device);
+    }
+
+    public void send(View view) {
+        bluetoothLe.writeChar();
     }
 }

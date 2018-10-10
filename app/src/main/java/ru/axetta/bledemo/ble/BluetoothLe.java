@@ -5,66 +5,65 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
-import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattService;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.support.annotation.RequiresApi;
 import android.util.Log;
 import android.widget.Toast;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-import ru.axetta.bledemo.R;
-
 public class BluetoothLe extends BluetoothGattCallback {
 
-    //TODO Replace with UART cntrl name
-    private static final String FILTER_NAME = "MI Band 2";
 
+    //    private static final String FILTER_NAME = "MI Band 2";
+//    private static final int SERIAL_NUMBER_VALUE = 0;
+//    private static final int HW_REV_VALUE = 1;
+//    private static final int SW_REV_VALUE = 2;
     private static final UUID GENERIC_ACCESS_SRVS = UUID.fromString("00001800-0000-1000-8000-00805f9b34fb");
     private static final UUID DEVICE_NAME_CHAR = UUID.fromString("00002a00-0000-1000-8000-00805f9b34fb");
+    //    private static final UUID DEVICE_INFO_SRVS = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb");
+//    private static final UUID DEVICE_SERIAL_NUM_CHAR = UUID.fromString("00002a25-0000-1000-8000-00805f9b34fb");
+//    private static final UUID HW_REV_CHAR = UUID.fromString("00002a27-0000-1000-8000-00805f9b34fb");
+//    private static final UUID SW_REV_CHAR = UUID.fromString("00002a28-0000-1000-8000-00805f9b34fb");
+//    private static final UUID ALERT_SRV_UUID = UUID.fromString("00001811-0000-1000-8000-00805f9b34fb");
+//    private static final UUID ALERT_CHAR_UUID = UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb");
+    private static final UUID CCC_DESCRIPTOR = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    private static final UUID DEVICE_INFO_SRVS = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb");
-    private static final UUID DEVICE_SERIAL_NUM_CHAR = UUID.fromString("00002a25-0000-1000-8000-00805f9b34fb");
-    private static final UUID HW_REV_CHAR = UUID.fromString("00002a27-0000-1000-8000-00805f9b34fb");
-    private static final UUID SW_REV_CHAR = UUID.fromString("00002a28-0000-1000-8000-00805f9b34fb");
+    private static final UUID DATA_SERVICE = UUID.fromString("F000C0E0-0451-4000-B000-000000000000");
+    private static final UUID DATA_CHAR = UUID.fromString("F000C0E1-0451-4000-B000-000000000000");
 
 
-    private final static UUID ALERT_SRV_UUID = UUID.fromString("00001811-0000-1000-8000-00805f9b34fb");
-    private final static UUID ALERT_CHAR_UUID = UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb");
-
-    private final static UUID CHARACTERISTIC_NOTIFICATION_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
-
-    private final static boolean aboveLollipop = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP;
+    private static final boolean aboveLollipop = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP;
     private static final int SCAN_MAX_TIME = 30_000;
 
+    private BluetoothGattCharacteristic dataChar;
+    private DeviceLe lastDevice;
     private Context context;
     private BluetoothAdapter bluetoothAdapter;
-    private BluetoothLeScanner btScanner;
     private BleCallback callback;
-    private BluetoothGatt gatt;
-    private DeviceLe nearestDevice;
-    private Queue<DeviceLe> rssiRequests = new ConcurrentLinkedQueue<>();
-    private Queue<BluetoothGattCharacteristic> charQueue = new ConcurrentLinkedQueue<>();
-    private BluetoothGattCharacteristic serialNum;
-    private BluetoothGattCharacteristic hwRev;
-    private BluetoothGattCharacteristic swRev;
-    private boolean findingNearest;
+    private BluetoothGatt mGatt;
+    private BluetoothLeScanner btScanner;
+    private Queue<byte[]> byteQueue = new ConcurrentLinkedQueue<>();
+    // TODO Значения могут быть не строковыми
+    private List<String> infoValues = new ArrayList<>();
 
     public interface BleCallback {
-        void onBluetoothEnable();
-
         void onScanStart();
 
         void onScanStop();
@@ -73,11 +72,11 @@ public class BluetoothLe extends BluetoothGattCallback {
 
         void onConnectFailed();
 
-        void onNearestFound(DeviceLe device);
-
         void onDisconnected();
 
-        void onDeviceInfoAvailable(DeviceLe device);
+        void onDeviceInfoAvailable();
+
+        void onCharChanged(byte[] value);
     }
 
 
@@ -88,35 +87,12 @@ public class BluetoothLe extends BluetoothGattCallback {
     }
 
 
-    public void initBluetooth() {
-        if (!context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
-            Toast.makeText(context.getApplicationContext(),
-                    R.string.ble_not_supported, Toast.LENGTH_LONG).show();
-        } else {
-            final BluetoothManager bluetoothManager =
-                    (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
-            if (bluetoothManager != null)
-                bluetoothAdapter = bluetoothManager.getAdapter();
-            else {
-                Toast.makeText(context.getApplicationContext(),
-                        R.string.bt_not_supported, Toast.LENGTH_LONG).show();
-                return;
-            }
-            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
-                callback.onBluetoothEnable();
-            } else {
-                startScan();
-            }
-        }
-    }
-
-    //----------------------------------------------------------------------------------------------
-
     private ScanCallback scanCallbackEx = new ScanCallback() {
         @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
             callback.onDeviceFound(new DeviceLe(result.getDevice(), result.getRssi()));
+            // Toast.makeText(context, "New device found " + result.getDevice().getName(), Toast.LENGTH_SHORT).show();
             Log.i("SCAN CALLBACK", "New device found " + result.getDevice().getName());
         }
 
@@ -126,7 +102,6 @@ public class BluetoothLe extends BluetoothGattCallback {
         }
     };
 
-    //----------------------------------------------------------------------------------------------
 
     private BluetoothAdapter.LeScanCallback leScanCallback = new BluetoothAdapter.LeScanCallback() {
         @Override
@@ -135,18 +110,15 @@ public class BluetoothLe extends BluetoothGattCallback {
         }
     };
 
-    //----------------------------------------------------------------------------------------------
 
     @Override
     public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+//        Toast.makeText(context, "Connecting..", Toast.LENGTH_SHORT).show();
+        Log.i("CONNECT", "CONNECT");
+        Log.i("CONNECT_1", "CONNECT_1");
         if (newState == BluetoothGatt.STATE_CONNECTED) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-
-                if (findingNearest) {
-                    gatt.readRemoteRssi();
-                    return;
-                }
-
+//                Toast.makeText(context, "Connected", Toast.LENGTH_SHORT).show();
                 if (!gatt.discoverServices()) {
                     connectionFailure();
                 }
@@ -158,7 +130,6 @@ public class BluetoothLe extends BluetoothGattCallback {
         }
     }
 
-    //----------------------------------------------------------------------------------------------
 
     @Override
     public void onServicesDiscovered(BluetoothGatt gatt, int status) {
@@ -166,46 +137,95 @@ public class BluetoothLe extends BluetoothGattCallback {
             connectionFailure();
             return;
         }
-        serialNum = gatt.getService(DEVICE_INFO_SRVS).getCharacteristic(DEVICE_SERIAL_NUM_CHAR);
-        hwRev = gatt.getService(DEVICE_INFO_SRVS).getCharacteristic(HW_REV_CHAR);
-        swRev = gatt.getService(DEVICE_INFO_SRVS).getCharacteristic(SW_REV_CHAR);
-        charQueue.offer(serialNum);
-        charQueue.offer(hwRev);
-        charQueue.offer(swRev);
-        gatt.readCharacteristic(serialNum);
+
+        BluetoothGattService dataService = gatt.getService(DATA_SERVICE);
+        if (dataService != null) {
+            Log.i("GATT_LOG", "Service is ready");
+            dataChar = dataService.getCharacteristic(DATA_CHAR);
+            if (dataChar != null) {
+                Log.i("GATT_LOG", "Char is ready");
+                BluetoothGattDescriptor cccdDesc = dataChar.getDescriptor(CCC_DESCRIPTOR);
+                if (cccdDesc != null) {
+                    Log.i("GATT_LOG", "CCCD is ready");
+                    cccdDesc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                    gatt.writeDescriptor(cccdDesc);
+                    gatt.setCharacteristicNotification(dataChar, true);
+                }
+            }
+        }
+
+
     }
 
-    //----------------------------------------------------------------------------------------------
+
+    @Override
+    public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+//        Log.i("CHARWRITE","Status " + status);
+        byte[] byteValue = byteQueue.poll();
+        if (byteValue != null) {
+            Log.i("CHARWRITE","Value " + Arrays.toString(byteValue));
+            dataChar.setValue(byteValue);
+            mGatt.writeCharacteristic(dataChar);
+        }
+    }
+
+    @Override
+    public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+        Log.i("NOTIFY", Arrays.toString(characteristic.getValue()));
+        callback.onCharChanged(characteristic.getValue());
+
+    }
+
+    public void writeChar() {
+
+        try {
+            InputStream in = context.getAssets().open("ble_data");
+            byte[] packet = new byte[20];
+            byteQueue.clear();
+            while (in.read(packet) != -1) {
+//            in.read(packet);
+                byteQueue.add(packet);
+                packet = new byte[20];
+            }
+
+            Log.i("GATT_LOG", String.valueOf(byteQueue.size()));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        if (dataChar != null) {
+//            byte[] byteValue = {0x11, 0x65, 0x6c, 0x6c, 0x6f, 0x7e, 0x47, 0x44};
+//            dataChar.setValue(byteValue);
+//            mGatt.writeCharacteristic(dataChar);
+            Log.i("CHARWRITE", "GONNA WRITE CHAR");
+            byte[] byteValue = byteQueue.poll();
+            if (byteValue != null) {
+                dataChar.setValue(byteValue);
+                mGatt.writeCharacteristic(dataChar);
+            }
+
+        } else {
+            if (lastDevice != null) {
+                connect(lastDevice);
+            }
+        }
+
+    }
+
 
     @Override
     public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-        if (status == BluetoothGatt.GATT_SUCCESS) {
-            BluetoothGattCharacteristic nextChar = charQueue.poll();
-            if (nextChar != null) {
-                gatt.readCharacteristic(nextChar);
-            } else {
-                callback.onDeviceInfoAvailable(new DeviceLe(gatt.getDevice(), 0, serialNum.getStringValue(0), hwRev.getStringValue(0), swRev.getStringValue(0)));
-            }
-        }
+//        infoValues.add(characteristic.getStringValue(0));
+//        BluetoothGattCharacteristic nextChar = byteQueue.poll();
+//        if (nextChar != null) {
+//            gatt.readCharacteristic(nextChar);
+//        } else {
+//            callback.onDeviceInfoAvailable();
+//        }
     }
 
 
-    //----------------------------------------------------------------------------------------------
-
-    @Override
-    public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
-        if (nearestDevice == null || nearestDevice.getRssi() < rssi) {
-            nearestDevice = new DeviceLe(gatt.getDevice(), rssi);
-        }
-        Log.i("RSSI ", String.valueOf(rssi));
-        gatt.disconnect();
-        getRssiQueueDevice();
-    }
-
-
-    //----------------------------------------------------------------------------------------------
-
-    public void startScan() {
+    public void scan() {
         if (aboveLollipop) {
             scanLeDeviceExtended();
         } else {
@@ -213,14 +233,13 @@ public class BluetoothLe extends BluetoothGattCallback {
         }
     }
 
-    //----------------------------------------------------------------------------------------------
 
     private void connectionFailure() {
         callback.onConnectFailed();
         Log.i("GATT ", "Connection failure");
+        Toast.makeText(context, "Failed to connect", Toast.LENGTH_SHORT).show();
     }
 
-    //----------------------------------------------------------------------------------------------
 
     @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     private void scanLeDeviceExtended() {
@@ -230,64 +249,36 @@ public class BluetoothLe extends BluetoothGattCallback {
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                stopScan();
+                btScanner.stopScan(scanCallbackEx);
+                callback.onScanStop();
             }
         }, SCAN_MAX_TIME);
-        ScanFilter scanServiceFilter = new ScanFilter.Builder().setDeviceName(FILTER_NAME).build();
-        filters.add(scanServiceFilter);
+//        ScanFilter scanServiceFilter = new ScanFilter.Builder().setDeviceName(FILTER_NAME).build();
+//        ScanFilter scanServiceFilter = new ScanFilter.Builder().setServiceUuid(ParcelUuid.fromString("000710af-0900-1821-1235-000030150000")).build();
+//        filters.add(scanServiceFilter);
         ScanSettings scanSettings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
         btScanner.startScan(null, scanSettings, scanCallbackEx);
         callback.onScanStart();
     }
 
-    //----------------------------------------------------------------------------------------------
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    public void stopScan() {
+        btScanner.stopScan(scanCallbackEx);
+    }
 
     private void scanLeDevice() {
         //TODO Make some 4.4 code
     }
 
-    //----------------------------------------------------------------------------------------------
-
-    public void stopScan() {
-        if (aboveLollipop) {
-            if (btScanner != null) {
-                btScanner.stopScan(scanCallbackEx);
-                callback.onScanStop();
-            }
-        }
-    }
-
-    //----------------------------------------------------------------------------------------------
 
     public void connect(DeviceLe deviceLe) {
-        gatt = deviceLe.getDevice().connectGatt(context, true, this);
+        lastDevice = deviceLe;
+        mGatt = deviceLe.getDevice().connectGatt(context, true, this);
     }
 
-    //----------------------------------------------------------------------------------------------
 
-    public void connectNearestDevice(List<DeviceLe> deviceList) {
-        findingNearest = true;
-        for (DeviceLe deviceLe : deviceList) {
-            rssiRequests.offer(deviceLe);
-        }
-        getRssiQueueDevice();
-    }
-
-    //----------------------------------------------------------------------------------------------
-
-    private void getRssiQueueDevice() {
-        if (!rssiRequests.isEmpty()) {
-            DeviceLe device = rssiRequests.poll();
-            device.getDevice().connectGatt(context, true, this);
-        } else {
-            if (nearestDevice != null) {
-                findingNearest = false;
-                callback.onNearestFound(nearestDevice);
-                nearestDevice.getDevice().connectGatt(context, true, this);
-            } else {
-                Log.i("GATT ", "No devices in area");
-            }
-        }
+    public String getInfoValue(int index) {
+        return infoValues.get(index);
     }
 
     //----------------------------------------------------------------------------------------------
@@ -295,21 +286,10 @@ public class BluetoothLe extends BluetoothGattCallback {
     public class DeviceLe {
         private BluetoothDevice device;
         private int rssi;
-        private String serialNumber;
-        private String hwRev;
-        private String swRev;
 
         DeviceLe(BluetoothDevice device, int rssi) {
             this.device = device;
             this.rssi = rssi;
-        }
-
-        public DeviceLe(BluetoothDevice device, int rssi, String serialNumber, String hwRev, String swRev) {
-            this.device = device;
-            this.rssi = rssi;
-            this.serialNumber = serialNumber;
-            this.hwRev = hwRev;
-            this.swRev = swRev;
         }
 
         public BluetoothDevice getDevice() {
@@ -326,30 +306,6 @@ public class BluetoothLe extends BluetoothGattCallback {
 
         public void setRssi(int rssi) {
             this.rssi = rssi;
-        }
-
-        public String getSerialNumber() {
-            return serialNumber;
-        }
-
-        public void setSerialNumber(String serialNumber) {
-            this.serialNumber = serialNumber;
-        }
-
-        public String getHwRev() {
-            return hwRev;
-        }
-
-        public void setHwRev(String hwRev) {
-            this.hwRev = hwRev;
-        }
-
-        public String getSwRev() {
-            return swRev;
-        }
-
-        public void setSwRev(String swRev) {
-            this.swRev = swRev;
         }
 
         @Override
