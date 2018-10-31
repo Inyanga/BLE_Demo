@@ -256,6 +256,7 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
         if (!deviceList.contains(device)) {
             deviceList.add(device);
             adapter.notifyDataSetChanged();
+
         }
     }
 
@@ -332,6 +333,12 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
             }
         });
 
+    }
+
+
+    @Override
+    public void onRssiReceived(int rssi, int i) {
+        
     }
 
     //    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)

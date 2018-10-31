@@ -36,8 +36,8 @@ public class BluetoothLe extends BluetoothGattCallback {
 //    private static final int SERIAL_NUMBER_VALUE = 0;
 //    private static final int HW_REV_VALUE = 1;
 //    private static final int SW_REV_VALUE = 2;
-    private static final UUID GENERIC_ACCESS_SRVS = UUID.fromString("00001800-0000-1000-8000-00805f9b34fb");
-    private static final UUID DEVICE_NAME_CHAR = UUID.fromString("00002a00-0000-1000-8000-00805f9b34fb");
+//    private static final UUID GENERIC_ACCESS_SRVS = UUID.fromString("00001800-0000-1000-8000-00805f9b34fb");
+//    private static final UUID DEVICE_NAME_CHAR = UUID.fromString("00002a00-0000-1000-8000-00805f9b34fb");
     //    private static final UUID DEVICE_INFO_SRVS = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb");
 //    private static final UUID DEVICE_SERIAL_NUM_CHAR = UUID.fromString("00002a25-0000-1000-8000-00805f9b34fb");
 //    private static final UUID HW_REV_CHAR = UUID.fromString("00002a27-0000-1000-8000-00805f9b34fb");
@@ -83,6 +83,8 @@ public class BluetoothLe extends BluetoothGattCallback {
         void onCharChanged(byte[] value);
 
         void onDataSend(String data, int length);
+
+        void onRssiReceived(int rssi, int i);
     }
 
 
