@@ -1,7 +1,6 @@
 package ru.axetta.bledemo;
 
 import android.Manifest;
-import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
@@ -13,7 +12,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
-import android.support.annotation.RequiresApi;
 import android.support.constraint.Group;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -37,7 +35,6 @@ import java.util.List;
 
 import ru.axetta.bledemo.ble.BluetoothLe;
 import ru.axetta.bledemo.recycler_logic.DeviceListAdapter;
-import ru.axetta.bledemo.recycler_logic.OnDeviceClickListener;
 
 public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCallback {
 
@@ -45,7 +42,7 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
     private BluetoothAdapter bluetoothAdapter;
     private List<BluetoothLe.DeviceLe> deviceList = new ArrayList<>();
     private ProgressBar progressBar;
-    private TextView statusText, dName, notifyValue, log, count;
+    private TextView statusText, dName, notifyValue, log, count, rssiText;
     private Button connectBtn,mainScan;
     private Group recyclerGroup, deviceGroup;
     private DeviceListAdapter adapter;
@@ -68,6 +65,7 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
         notifyValue = findViewById(R.id.notify_value);
         count = findViewById(R.id.count);
         mainScan = findViewById(R.id.main_scan);
+        rssiText = findViewById(R.id.rssiText);
         log = findViewById(R.id.log);
         log.setMovementMethod(new ScrollingMovementMethod());
         recyclerGroup = findViewById(R.id.recyclerGroup);
@@ -337,8 +335,17 @@ public class MainActivity extends AppCompatActivity implements BluetoothLe.BleCa
 
 
     @Override
-    public void onRssiReceived(int rssi, int i) {
-        
+    public void onRssiReceived(BluetoothDevice device, int rssi) {
+        for(BluetoothLe.DeviceLe deviceLe : deviceList) {
+            if(deviceLe.getDevice().equals(device)) {
+                deviceLe.setRssi(rssi);
+                rssiText.setText(String.valueOf(rssi));
+                break;
+            }
+        }
+
+
+        adapter.notifyDataSetChanged();
     }
 
     //    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)

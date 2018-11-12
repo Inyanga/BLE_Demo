@@ -24,8 +24,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -65,6 +69,8 @@ public class BluetoothLe extends BluetoothGattCallback {
     // TODO Значения могут быть не строковыми
     private List<String> infoValues = new ArrayList<>();
 
+    private Map<String, BluetoothGatt> connectedDeviceMap = new HashMap<>();
+
     public interface BleCallback {
         void onScanStart();
 
@@ -84,7 +90,7 @@ public class BluetoothLe extends BluetoothGattCallback {
 
         void onDataSend(String data, int length);
 
-        void onRssiReceived(int rssi, int i);
+        void onRssiReceived(BluetoothDevice device, int rssi);
     }
 
 
@@ -95,12 +101,30 @@ public class BluetoothLe extends BluetoothGattCallback {
     }
 
 
+    public void startReadingRssi() {
+        new Timer().scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                for (Map.Entry<String, BluetoothGatt> entry : connectedDeviceMap.entrySet())
+                {
+                   entry.getValue().readRemoteRssi();
+                }
+            }
+        }, 0, 500);
+    }
+
+    @Override
+    public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
+        callback.onRssiReceived(gatt.getDevice(), rssi);
+    }
+
     private ScanCallback scanCallbackEx = new ScanCallback() {
 //        @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
             callback.onDeviceFound(new DeviceLe(result.getDevice(), result.getRssi()));
-            // Toast.makeText(context, "New device found " + result.getDevice().getName(), Toast.LENGTH_SHORT).show();
+            callback.onDeviceFound(new DeviceLe(result.getDevice(), result.getRssi()));
+            result.getDevice().connectGatt(context, false, BluetoothLe.this);
             Log.i("SCAN CALLBACK", "New device found " + result.getDevice().getName());
         }
 
@@ -115,27 +139,41 @@ public class BluetoothLe extends BluetoothGattCallback {
         @Override
         public void onLeScan(BluetoothDevice bluetoothDevice, int rssi, byte[] bytes) {
             callback.onDeviceFound(new DeviceLe(bluetoothDevice, rssi));
+            bluetoothDevice.connectGatt(context, false, BluetoothLe.this);
+
+
         }
     };
 
 
     @Override
     public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-
-        Log.i("CONNECT", "CONNECT");
-        Log.i("CONNECT_1", "CONNECT_1");
+        BluetoothDevice device = gatt.getDevice();
+        String mac = device.getAddress();
+//
         if (newState == BluetoothGatt.STATE_CONNECTED) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
 
 
-                if (!gatt.discoverServices()) {
-                    connectionFailure();
+                if(!connectedDeviceMap.containsKey(mac)) {
+                    connectedDeviceMap.put(mac, gatt);
                 }
+//                if (!gatt.discoverServices()) {
+//                    connectionFailure();
+//                }
             } else {
                 connectionFailure();
             }
         } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
             callback.onDisconnected();
+            if (connectedDeviceMap.containsKey(mac)){
+                BluetoothGatt bluetoothGatt = connectedDeviceMap.get(mac);
+                if( bluetoothGatt != null ){
+                    bluetoothGatt.close();
+                    bluetoothGatt = null;
+                }
+                connectedDeviceMap.remove(mac);
+            }
         }
     }
 
@@ -160,6 +198,8 @@ public class BluetoothLe extends BluetoothGattCallback {
                     cccdDesc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                     gatt.writeDescriptor(cccdDesc);
                     gatt.setCharacteristicNotification(dataChar, true);
+
+
                 }
             }
         }
@@ -242,7 +282,9 @@ public class BluetoothLe extends BluetoothGattCallback {
 //        } else {
 //            scanLeDevice();
 //        }
+
         scanLeDeviceExtended();
+        startReadingRssi();
     }
 
 
@@ -307,6 +349,11 @@ public class BluetoothLe extends BluetoothGattCallback {
     public String getInfoValue(int index) {
         return infoValues.get(index);
     }
+
+
+
+
+
 
     //----------------------------------------------------------------------------------------------
 
